@@ -17,11 +17,6 @@ const Version = "1.0"
 
 // UCD-SNMP-MIB, for agents using NET-SNMP
 const (
-	// Disk
-	snmpDskTablePath  = ".1.3.6.1.4.1.2021.9.1.2"
-	snmpDskTableTotal = ".1.3.6.1.4.1.2021.9.1.6"
-	snmpDskTableUsed  = ".1.3.6.1.4.1.2021.9.1.8"
-
 	// RAM
 	snmpMemTotal     = ".1.3.6.1.4.1.2021.4.5.0"
 	snmpMemAvailable = ".1.3.6.1.4.1.2021.4.6.0"
@@ -166,35 +161,18 @@ func main() {
 			fmt.Printf(" 'CPU core %d'=%d%%;;;0;100", i, load)
 		}
 	case "disk":
-		switch *operatingSystem {
-		case osLinux:
-			disk, err := getDiskUnix(snmp, *path)
+		disk, err := getDisk(snmp, *path, *operatingSystem)
 
-			if err != nil {
-				fmt.Println("getDisk error:", err)
-				os.Exit(nagiosUnknown)
-			}
-
-			returnCode = getStatus(*warning, *critical, disk.Percent)
-
-			// Print display data, performance data in kilobytes, and performance data in percentage, including warning levels
-			fmt.Printf("DISK %s %s - %d%% used", *path, convertStatus(returnCode), disk.Percent)
-			fmt.Printf("|'Disk'=%dKB;;;0;%d", disk.Used, disk.Total)
-			fmt.Printf(" 'Disk %%'=%d%%;%d;%d;0;100", disk.Percent, *warning, *critical)
-		case osWindows:
-			disk, err := getDiskWin(snmp, *path)
-
-			if err != nil {
-				fmt.Println("getDisk error:", err)
-				os.Exit(nagiosUnknown)
-			}
-			returnCode = getStatus(*warning, *critical, disk.Percent)
-
-			// Print display data, performance data in kilobytes, and performance data in percentage, including warning levels
-			fmt.Printf("DISK %s %s - %d%% used", *path, convertStatus(returnCode), disk.Percent)
-			fmt.Printf("|'Disk'=%dB;;;0;%d", disk.Used, disk.Total)
-			fmt.Printf(" 'Disk %%'=%d%%;%d;%d;0;100", disk.Percent, *warning, *critical)
+		if err != nil {
+			fmt.Println("getDisk error:", err)
+			os.Exit(nagiosUnknown)
 		}
+		returnCode = getStatus(*warning, *critical, disk.Percent)
+
+		// Print display data, performance data in bytes, and performance data in percentage, including warning levels
+		fmt.Printf("DISK %s %s - %d%% used", *path, convertStatus(returnCode), disk.Percent)
+		fmt.Printf("|'Disk'=%dB;;;0;%d", disk.Used, disk.Total)
+		fmt.Printf(" 'Disk %%'=%d%%;%d;%d;0;100", disk.Percent, *warning, *critical)
 	case "ram":
 		switch *operatingSystem {
 		case osLinux:
@@ -211,7 +189,7 @@ func main() {
 			fmt.Printf("|'RAM'=%dKB;;;0;%d", ram.Used, ram.Total)
 			fmt.Printf(" 'RAM %%'=%d%%;%d;%d;0;100", ram.Percent, *warning, *critical)
 		case osWindows:
-			ram, err := getDiskWin(snmp, "Physical Memory")
+			ram, err := getDisk(snmp, "Physical Memory", *operatingSystem)
 
 			if err != nil {
 				fmt.Println("getRAM error:", err)
@@ -220,7 +198,7 @@ func main() {
 			returnCode = getStatus(*warning, *critical, ram.Percent)
 
 			fmt.Printf("RAM %s - %d%% used", convertStatus(returnCode), ram.Percent)
-			fmt.Printf("|'RAM'=%dKB;;;0;%d", ram.Used, ram.Total)
+			fmt.Printf("|'RAM'=%dB;;;0;%d", ram.Used, ram.Total)
 			fmt.Printf(" 'RAM %%'=%d%%;%d;%d;0;100", ram.Percent, *warning, *critical)
 		}
 	}
@@ -262,74 +240,8 @@ func getCPU(snmp *gosnmp.GoSNMP) (snmpCPU, error) {
 	return cpu, err
 }
 
-// getDiskUnix retrives disk information using UCD-SNMP-MIB::dskTable MIB
-func getDiskUnix(snmp *gosnmp.GoSNMP, path string) (snmpDisk, error) {
-	var disk = snmpDisk{}
-
-	err := snmp.Connect()
-
-	if err != nil {
-		return disk, err
-	}
-	defer snmp.Conn.Close()
-
-	// Retrieve the index number of the partition
-	regexPaths := regexp.MustCompile(regexp.QuoteMeta(snmpDskTablePath) + `\.(\d+)`)
-
-	err = snmp.BulkWalk(snmpDskTablePath, func(pdu gosnmp.SnmpPDU) error {
-
-		if regexPaths.MatchString(pdu.Name) {
-			var group = regexPaths.FindStringSubmatch(pdu.Name)
-
-			var diskPath = string(pdu.Value.([]byte))
-
-			if path == diskPath {
-				disk = snmpDisk{
-					Index: group[1],
-					Path:  diskPath,
-				}
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return disk, err
-	} else if disk.Index == "" { // Check if the index field has been populated, if it's not, the disk doesn't exist
-		return disk, fmt.Errorf("Disk %s not found", path)
-	}
-
-	// Append the index number to the OIDs, this is how we get only information regarding that partition
-	var oidTotal = snmpDskTableTotal + "." + disk.Index
-	var oidUsed = snmpDskTableUsed + "." + disk.Index
-
-	var oids = []string{oidTotal, oidUsed}
-
-	result, err2 := snmp.Get(oids)
-
-	if err2 != nil {
-		return disk, err2
-	}
-
-	// Loop the results and populate the snmpDisk object
-	for _, pdu := range result.Variables {
-		switch pdu.Name {
-		case oidTotal:
-			disk.Total = gosnmp.ToBigInt(pdu.Value).Int64()
-		case oidUsed:
-			disk.Used = gosnmp.ToBigInt(pdu.Value).Int64()
-		}
-	}
-
-	// Do a manual calculation of the percentage, this is actually available through dskPercent, but to have control over the rounding and to have one query less we do it manually
-	disk.Percent = calculatePercentage(disk.Used, disk.Total)
-
-	return disk, nil
-}
-
-// getDiskWin retrives disk information using the HOST-RESOURCES-MIB::hrStorage MIB
-func getDiskWin(snmp *gosnmp.GoSNMP, path string) (snmpDisk, error) {
+// getDisk retrieves disk information using the HOST-RESOURCES-MIB::hrStorage MIB
+func getDisk(snmp *gosnmp.GoSNMP, path string, operatingSystem string) (snmpDisk, error) {
 	var disk = snmpDisk{}
 
 	err := snmp.Connect()
@@ -340,27 +252,47 @@ func getDiskWin(snmp *gosnmp.GoSNMP, path string) (snmpDisk, error) {
 	defer snmp.Conn.Close()
 
 	regexPaths := regexp.MustCompile(regexp.QuoteMeta(snmpHrStorageDescr) + `\.(\d+)`)
-	regexLetter := regexp.MustCompile(path + `:\\.*Label:.*Serial Number.*`)
 
-	// Retrieve the index number of the drive
-	err = snmp.BulkWalk(snmpHrStorageDescr, func(pdu gosnmp.SnmpPDU) error {
+	if operatingSystem == osWindows {
+		regexLetter := regexp.MustCompile(path + `:\\.*Label:.*Serial Number.*`)
 
-		if regexPaths.MatchString(pdu.Name) {
-			var group = regexPaths.FindStringSubmatch(pdu.Name)
+		// Retrieve the index number of the drive
+		err = snmp.BulkWalk(snmpHrStorageDescr, func(pdu gosnmp.SnmpPDU) error {
+			if regexPaths.MatchString(pdu.Name) {
+				var group = regexPaths.FindStringSubmatch(pdu.Name)
+				var diskPath = string(pdu.Value.([]byte))
 
-			var diskPath = string(pdu.Value.([]byte))
+				// If we're trying to get RAM, don't use the regex as it won't match
+				if (path == "Physical Memory" && diskPath == "Physical Memory") || regexLetter.MatchString(diskPath) {
+					disk = snmpDisk{
+						Index: group[1],
+						Path:  diskPath,
+					}
+				}
 
-			// If we're trying to get RAM, don't use the regex as it won't match
-			if (path == "Physical Memory" && diskPath == "Physical Memory") || regexLetter.MatchString(diskPath) {
-				disk = snmpDisk{
-					Index: group[1],
-					Path:  diskPath,
+			}
+
+			return nil
+		})
+	} else if operatingSystem == osLinux {
+		err = snmp.BulkWalk(snmpHrStorageDescr, func(pdu gosnmp.SnmpPDU) error {
+			if regexPaths.MatchString(pdu.Name) {
+				var group = regexPaths.FindStringSubmatch(pdu.Name)
+				var diskPath = string(pdu.Value.([]byte))
+
+				if path == diskPath {
+					disk = snmpDisk{
+						Index: group[1],
+						Path:  diskPath,
+					}
 				}
 			}
-		}
 
-		return nil
-	})
+			return nil
+		})
+	} else {
+		return disk, fmt.Errorf("Unsupported operating system")
+	}
 
 	if err != nil {
 		return disk, err
