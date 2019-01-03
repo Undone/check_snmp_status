@@ -149,7 +149,7 @@ func main() {
 		cpu, err := getCPU(snmp)
 
 		if err != nil {
-			fmt.Println("getRAM error:", err)
+			fmt.Println("getCPU error:", err)
 			os.Exit(nagiosUnknown)
 		}
 
@@ -253,7 +253,13 @@ func getCPU(snmp *gosnmp.GoSNMP) (snmpCPU, error) {
 		return nil
 	})
 
-	return cpu, nil
+	if err != nil {
+		return cpu, err
+	} else if i == 0 {
+		return cpu, fmt.Errorf("No CPU cores found")
+	}
+
+	return cpu, err
 }
 
 // getDiskUnix retrives disk information using UCD-SNMP-MIB::dskTable MIB
