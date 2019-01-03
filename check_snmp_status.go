@@ -192,7 +192,7 @@ func main() {
 
 			// Print display data, performance data in kilobytes, and performance data in percentage, including warning levels
 			fmt.Printf("DISK %s %s - %d%% used", *path, convertStatus(returnCode), disk.Percent)
-			fmt.Printf("|'Disk'=%dKB;;;0;%d", disk.Used, disk.Total)
+			fmt.Printf("|'Disk'=%dB;;;0;%d", disk.Used, disk.Total)
 			fmt.Printf(" 'Disk %%'=%d%%;%d;%d;0;100", disk.Percent, *warning, *critical)
 		}
 	case "ram":
