@@ -352,7 +352,7 @@ func getRAM(snmp *gosnmp.GoSNMP) (snmpRAM, error) {
 	result, err2 := snmp.Get(oids)
 
 	if err2 != nil {
-		return ram, err
+		return ram, err2
 	}
 
 	for _, pdu := range result.Variables {
