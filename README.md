@@ -11,7 +11,13 @@ RAM mode will output performance data of physical memory in percentage and kilob
 ## Disk mode
 Disk will also output performance data of the specified partition in percentage and kilobytes.
 
-## Example usage
+## Interface mode
+Interface mode will check if the interface is connected, and output the counter values for sent/received octets
+
+## Usage
+<details>
+<summary>Command line examples</summary>
+
 Retrieve disk usage of a linux system from a partition mounted on /
 
 ```
@@ -51,6 +57,7 @@ check_snmp_status.exe -host 10.0.0.3 -community public -mode disk -path E -os wi
 
 DISK E CRITICAL - 99% used|'Disk'=994761728000KB;;;0;1000067821568 'Disk %'=99%;80;95;0;100
 ```
+</details>
 
 All available parameters;
 
@@ -65,11 +72,11 @@ Usage of check_snmp_status.exe:
   -host string
         Host IP address, required parameter
   -mode string
-        [disk|cpu|ram] Specify the mode to be used
+        [disk|cpu|ram|interface] Specify the mode to be used
   -os string
         [linux|windows] Operating system of the target (default "linux")
   -path string
-        Partition mount-point with unix or drive letter with windows when retrieving disk usage, required with disk mode
+        Partition mount-point with unix or drive letter with windows when retrieving disk usage, is also used for interface name
   -port int
         SNMP port (default 161)
   -version
@@ -77,7 +84,9 @@ Usage of check_snmp_status.exe:
 ```
 
 ## Example of configuring Icinga2 to use this plugin
-commands.conf
+<details>
+<summary>commands.conf</summary>
+
 ```
 object CheckCommand "check-snmp-ram" {
   command = [ PluginDir + "/check_snmp_status" ]
@@ -122,9 +131,22 @@ object CheckCommand "check-snmp-cpu" {
   }
 }
 
-```
+object CheckCommand "check-snmp-interface" {
+  command = [ PluginDir + "/check_snmp_status" ]
 
-services.conf
+  arguments = {
+        "-host"         = "$address$"
+        "-port"         = "$snmp_port$"
+        "-community"    = "$snmp_community$"
+        "-mode"         = "interface"
+        "-path"         = "$interface_path$"
+  }
+}
+
+```
+</details>
+<details>
+<summary>services.conf</summary>
 
 ```
 apply Service "snmp-cpu" {
@@ -155,17 +177,32 @@ apply Service for (disk in host.vars.snmp_disks) {
         assign where host.vars.snmp_community != "" && host.vars.snmp_disks
 }
 
+apply Service for (interface in host.vars.snmp_interfaces) {
+        import "generic-service"
+
+        check_command = "check-snmp-interface"
+        check_interval = 5m
+        display_name = "snmp-interface"
+        vars.interface_path = interface
+
+        assign where host.vars.snmp_community != "" && host.vars.snmp_interfaces
+}
+
 ```
-hosts.conf
+</details>
+<details>
+<summary>hosts.conf</summary>
+
 ```
 object Host "linux-host1" {
-        display_name = "linux1"
+        import "generic-host"
         address = "10.0.0.1"
-        check_command = "hostalive"
 
         vars.os = "linux"
         vars.snmp_community = "public"
 
         vars.snmp_disks = ["/", "/var"]
+        vars.snmp_interfaces = ["eth0"]
 }
 ```
+</details>
