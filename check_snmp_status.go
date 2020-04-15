@@ -38,10 +38,10 @@ const (
 
 // ifMib, 64-bit interface counters
 const (
-	snmpIfName 				= ".1.3.6.1.2.1.31.1.1.1.1"
+	snmpIfName				= ".1.3.6.1.2.1.31.1.1.1.1"
 	snmpIfHCInOctets		= ".1.3.6.1.2.1.31.1.1.1.6"
 	snmpIfHCOutOctets		= ".1.3.6.1.2.1.31.1.1.1.10"
-	snmpIfConnectorPresent 	= ".1.3.6.1.2.1.31.1.1.1.17"
+	snmpIfConnectorPresent	= ".1.3.6.1.2.1.31.1.1.1.17"
 )
 
 const (
@@ -59,47 +59,27 @@ const (
 
 // Possible values for ifMib::ifConnectorPresent
 const (
-	ConnectorPresentTrue = 1
-	ConnectorPresentFalse = 2
+	ConnectorPresentTrue	= 1
+	ConnectorPresentFalse	= 2
 )
 
 // snmpDisk contains the disk usage information of a partition
 type snmpDisk struct {
-	// Index in the dskTable
-	Index string
-
-	// Path of disk mount point
-	Path string
-
-	// Total disk capacity
-	Total int64
-
-	// Used disk capacity
-	Used int64
-
-	// Used disk capacity in percentage
-	Percent int
+	Index string // Index in the dskTable
+	Path string // Path of disk mount point
+	Total int64 // Total disk capacity
+	Used int64 // Used disk capacity
+	Percent int // Used disk capacity in percentage
 }
 
 // snmpRAM contains the values for RAM
 type snmpRAM struct {
-	// Total amount of RAM in system
-	Total int64
-
-	// Available RAM capacity
-	Available int64
-
-	// Amount of buffered RAM
-	Buffered int64
-
-	// Amount of cached RAM
-	Cached int64
-
-	// Used RAM capacity
-	Used int64
-
-	// Used RAM capacity in percentage
-	Percent int
+	Total int64 // Total amount of RAM in system
+	Available int64 // Available RAM capacity
+	Buffered int64 // Amount of buffered RAM
+	Cached int64 // Amount of cached RAM
+	Used int64 // Used RAM capacity
+	Percent int // Used RAM capacity in percentage
 }
 
 type snmpCPU map[int]int
@@ -117,12 +97,13 @@ func (cpu snmpCPU) Average() int {
 	return avg
 }
 
+// snmpInterface contains interface statistics
 type snmpInterface struct {
-	Name string
-	Index string
-	InOctets int64
-	OutOctets int64
-	ConnectorPresent int
+	Name string // Name of the interface
+	Index string // Index in the snmp ifXEntry table
+	InOctets int64 // Received octets
+	OutOctets int64 // Sent octets
+	ConnectorPresent int // Is the interface connected
 }
 
 func main() {
