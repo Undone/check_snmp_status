@@ -1,5 +1,5 @@
 # check_snmp_status
-Nagios/Icinga plugin for retrieving CPU/RAM/Disk usage written in Go. It uses a [gosnmp library created by soniah](https://github.com/soniah/gosnmp)
+Nagios/Icinga plugin for retrieving CPU/RAM/Disk/Network usage written in Go. It uses a [gosnmp library created by soniah](https://github.com/soniah/gosnmp)
 for handling the network side of SNMP.
 
 ## CPU mode
