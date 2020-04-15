@@ -44,6 +44,12 @@ const (
 	snmpIfConnectorPresent	= ".1.3.6.1.2.1.31.1.1.1.17"
 )
 
+// lm-sensors snmp table
+const (
+	snmpLmTempSensorsDevice	= ".1.3.6.1.4.1.2021.13.16.2.1.2"
+	snmpLmTempSensorsValue	= ".1.3.6.1.4.1.2021.13.16.2.1.3"
+)
+
 const (
 	osLinux   = "linux"
 	osWindows = "windows"
@@ -104,6 +110,12 @@ type snmpInterface struct {
 	InOctets int64 // Received octets
 	OutOctets int64 // Sent octets
 	ConnectorPresent int // Is the interface connected
+}
+
+type snmpTemperature struct {
+	Name string // Name of the temperature object
+	Index string // Index in the snmp table
+	Value uint // The temperature
 }
 
 func main() {
@@ -224,7 +236,19 @@ func main() {
 		// Print performance data
 		fmt.Printf("|'Interface In'=%dc", iface.InOctets)
 		fmt.Printf(" 'Interface Out'=%dc", iface.OutOctets)
-	case "":
+	case "temp":
+		temp, err := getTemperature(snmp, *path)
+
+		if err != nil {
+			fmt.Println("getTemperature error:", err)
+			os.Exit(nagiosUnknown)
+		}
+
+		returnCode = getStatus(*warning, *critical, int(temp.Value))
+
+		fmt.Printf("TEMP %s - %d", convertStatus(returnCode), temp.Value)
+		fmt.Printf("|'Temperature'=%d;%d;%d", temp.Value, *warning, *critical)
+	default:
 		fmt.Println("No mode selected")
 	}
 
@@ -410,7 +434,7 @@ func getInterface(snmp *gosnmp.GoSNMP, interfaceName string) (snmpInterface, err
 	index, err2 := findIndexByName(snmp, snmpIfName, interfaceName)
 
 	if err2 != nil {
-		return iface, err
+		return iface, err2
 	} else if index == "" { // Check if the index field has been populated, if it's not, the interface doesn't exist
 		return iface, fmt.Errorf("Interface %s not found", interfaceName)
 	}
@@ -445,6 +469,49 @@ func getInterface(snmp *gosnmp.GoSNMP, interfaceName string) (snmpInterface, err
 	}
 
 	return iface, nil
+}
+
+func getTemperature(snmp *gosnmp.GoSNMP, temperatureName string) (snmpTemperature, error) {
+	var temp = snmpTemperature{}
+	err := snmp.Connect()
+
+	if err != nil {
+		return temp, err
+	}
+	defer snmp.Conn.Close()
+
+	index, err2 := findIndexByName(snmp, snmpLmTempSensorsDevice, temperatureName)
+
+	if err2 != nil {
+		return temp, err2
+	} else if index == "" { // Check if the index field has been populated, if it's not, the temperature device doesn't exist
+		return temp, fmt.Errorf("Temperature %s not found", temperatureName)
+	}
+
+	temp = snmpTemperature{
+		Index: index,
+		Name: temperatureName,
+	}
+
+	var oidValue = snmpLmTempSensorsValue + "." + temp.Index
+	var oids = []string{oidValue}
+
+	result, err2 := snmp.Get(oids)
+
+	if err2 != nil {
+		return temp, err2
+	}
+
+	for _,pdu := range result.Variables {
+		if pdu.Name == oidValue {
+			temp.Value = pdu.Value.(uint)
+			// The value seems to be saved with a reservation for the decimals, for example 34 celsius would be 34000
+			temp.Value = temp.Value / 1000
+			return temp, nil
+		}
+	}
+
+	return temp, nil
 }
 
 // find the oid index number for a value
