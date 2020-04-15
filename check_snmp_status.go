@@ -36,6 +36,14 @@ const (
 	snmpHrProcessorLoad = ".1.3.6.1.2.1.25.3.3.1.2"
 )
 
+// ifMib, 64-bit interface counters
+const (
+	snmpIfName 				= ".1.3.6.1.2.1.31.1.1.1.1"
+	snmpIfHCInOctets		= ".1.3.6.1.2.1.31.1.1.1.6"
+	snmpIfHCOutOctets		= ".1.3.6.1.2.1.31.1.1.1.10"
+	snmpIfConnectorPresent 	= ".1.3.6.1.2.1.31.1.1.1.17"
+)
+
 const (
 	osLinux   = "linux"
 	osWindows = "windows"
@@ -47,6 +55,12 @@ const (
 	nagiosWarning  = 1
 	nagiosCritical = 2
 	nagiosUnknown  = 3
+)
+
+// Possible values for ifMib::ifConnectorPresent
+const (
+	ConnectorPresentTrue = 1
+	ConnectorPresentFalse = 2
 )
 
 // snmpDisk contains the disk usage information of a partition
@@ -103,12 +117,20 @@ func (cpu snmpCPU) Average() int {
 	return avg
 }
 
+type snmpInterface struct {
+	Name string
+	Index string
+	InOctets int64
+	OutOctets int64
+	ConnectorPresent int
+}
+
 func main() {
 	var host = flag.String("host", "", "Host IP address, required parameter")
 	var port = flag.Int("port", 161, "SNMP port")
 	var community = flag.String("community", "public", "SNMP community")
-	var path = flag.String("path", "", "Partition mount-point with unix or drive letter with windows when retrieving disk usage, required with disk mode")
-	var mode = flag.String("mode", "", "[disk|cpu|ram] Specify the mode to be used")
+	var path = flag.String("path", "", "Partition mount-point with unix or drive letter with windows when retrieving disk usage, is also used for interface name")
+	var mode = flag.String("mode", "", "[disk|cpu|ram|interface] Specify the mode to be used")
 	var operatingSystem = flag.String("os", osLinux, "[linux|windows] Operating system of the target")
 	var warning = flag.Int("W", 100, "Percentage that should trigger a warning level")
 	var critical = flag.Int("C", 100, "Percentage that should trigger a critical level")
@@ -201,6 +223,28 @@ func main() {
 			fmt.Printf("|'RAM'=%dB;;;0;%d", ram.Used, ram.Total)
 			fmt.Printf(" 'RAM %%'=%d%%;%d;%d;0;100", ram.Percent, *warning, *critical)
 		}
+	case "interface":
+		iface, err := getInterface(snmp, *path)
+
+		if err != nil {
+			fmt.Println("getInterface error:", err)
+			os.Exit(nagiosUnknown)
+		}
+
+		// Check if the interface is connected
+		if iface.ConnectorPresent == ConnectorPresentTrue {
+			returnCode = nagiosOk
+			fmt.Printf("INTERFACE %s - Connected", *path)
+		} else {
+			returnCode = nagiosWarning
+			fmt.Printf("INTERFACE %s - Disconnected", *path)
+		}
+
+		// Print performance data
+		fmt.Printf("|'Interface In'=%dc", iface.InOctets)
+		fmt.Printf(" 'Interface Out'=%dc", iface.OutOctets)
+	case "":
+		fmt.Println("No mode selected")
 	}
 
 	os.Exit(returnCode)
@@ -373,6 +417,68 @@ func getRAM(snmp *gosnmp.GoSNMP) (snmpRAM, error) {
 	ram.Percent = calculatePercentage(ram.Used, ram.Total)
 
 	return ram, nil
+}
+
+// getInterface retrieves interface statistics from ifMib
+func getInterface(snmp *gosnmp.GoSNMP, interfaceName string) (snmpInterface, error) {
+	var iface = snmpInterface{}
+	err := snmp.Connect()
+
+	if err != nil {
+		return iface, err
+	}
+	defer snmp.Conn.Close()
+
+	regexNames := regexp.MustCompile(regexp.QuoteMeta(snmpIfName) + `\.(\d+)`)
+
+	// Find the interface index by finding the name
+	err = snmp.BulkWalk(snmpIfName, func(pdu gosnmp.SnmpPDU) error {
+		if regexNames.MatchString(pdu.Name) {
+			var group = regexNames.FindStringSubmatch(pdu.Name)
+			var name = string(pdu.Value.([]byte))
+
+			if name == interfaceName {
+				iface = snmpInterface{
+					Index: group[1],
+					Name: interfaceName,
+				}
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return iface, err
+	} else if iface.Index == "" { // Check if the index field has been populated, if it's not, the interface doesn't exist
+		return iface, fmt.Errorf("Interface %s not found", interfaceName)
+	}
+
+	// Append the index number to the OIDs
+	var oidInOctets = snmpIfHCInOctets + "." + iface.Index
+	var oidOutOctets = snmpIfHCOutOctets + "." + iface.Index
+	var oidConnPresent = snmpIfConnectorPresent + "." + iface.Index
+
+	var oids = []string{oidInOctets, oidOutOctets, oidConnPresent}
+
+	result, err2 := snmp.Get(oids)
+
+	if err2 != nil {
+		return iface, err2
+	}
+
+	for _,pdu := range result.Variables {
+		switch pdu.Name {
+		case oidInOctets:
+			iface.InOctets = gosnmp.ToBigInt(pdu.Value).Int64()
+		case oidOutOctets:
+			iface.OutOctets = gosnmp.ToBigInt(pdu.Value).Int64()
+		case oidConnPresent:
+			iface.ConnectorPresent = pdu.Value.(int)
+		}
+	}
+
+	return iface, nil
 }
 
 // getStatus checks if the value parameter is greater than critical level or warning level, and returns a nagios format exit code
