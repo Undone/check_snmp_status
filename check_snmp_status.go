@@ -13,7 +13,7 @@ import (
 )
 
 // Version of release
-const Version = "1.1"
+const Version = "1.2"
 
 // UCD-SNMP-MIB, for agents using NET-SNMP
 const (
