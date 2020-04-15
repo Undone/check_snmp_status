@@ -300,21 +300,18 @@ func getDisk(snmp *gosnmp.GoSNMP, path string, operatingSystem string) (snmpDisk
 			return nil
 		})
 	} else if operatingSystem == osLinux {
-		err = snmp.BulkWalk(snmpHrStorageDescr, func(pdu gosnmp.SnmpPDU) error {
-			if regexPaths.MatchString(pdu.Name) {
-				var group = regexPaths.FindStringSubmatch(pdu.Name)
-				var diskPath = string(pdu.Value.([]byte))
+		index, err2 := findIndexByName(snmp, snmpHrStorageDescr, path)
 
-				if path == diskPath {
-					disk = snmpDisk{
-						Index: group[1],
-						Path:  diskPath,
-					}
-				}
-			}
+		if err2 != nil {
+			return disk, err2
+		} else if index == "" {
+			return disk, fmt.Errorf("Disk %s not found", path)
+		}
 
-			return nil
-		})
+		disk = snmpDisk{
+			Index: index,
+			Path: path,
+		}
 	} else {
 		return disk, fmt.Errorf("Unsupported operating system")
 	}
@@ -410,29 +407,17 @@ func getInterface(snmp *gosnmp.GoSNMP, interfaceName string) (snmpInterface, err
 	}
 	defer snmp.Conn.Close()
 
-	regexNames := regexp.MustCompile(regexp.QuoteMeta(snmpIfName) + `\.(\d+)`)
+	index, err2 := findIndexByName(snmp, snmpIfName, interfaceName)
 
-	// Find the interface index by finding the name
-	err = snmp.BulkWalk(snmpIfName, func(pdu gosnmp.SnmpPDU) error {
-		if regexNames.MatchString(pdu.Name) {
-			var group = regexNames.FindStringSubmatch(pdu.Name)
-			var name = string(pdu.Value.([]byte))
-
-			if name == interfaceName {
-				iface = snmpInterface{
-					Index: group[1],
-					Name: interfaceName,
-				}
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil {
+	if err2 != nil {
 		return iface, err
-	} else if iface.Index == "" { // Check if the index field has been populated, if it's not, the interface doesn't exist
+	} else if index == "" { // Check if the index field has been populated, if it's not, the interface doesn't exist
 		return iface, fmt.Errorf("Interface %s not found", interfaceName)
+	}
+
+	iface = snmpInterface{
+		Index: index,
+		Name: interfaceName,
 	}
 
 	// Append the index number to the OIDs
@@ -460,6 +445,28 @@ func getInterface(snmp *gosnmp.GoSNMP, interfaceName string) (snmpInterface, err
 	}
 
 	return iface, nil
+}
+
+// find the oid index number for a value
+func findIndexByName(snmp *gosnmp.GoSNMP, tableName string, indexName string) (string, error) {
+	var index = ""
+	regexNames := regexp.MustCompile(regexp.QuoteMeta(tableName) + `\.(\d+)`)
+	
+	err := snmp.BulkWalk(tableName, func(pdu gosnmp.SnmpPDU) error {
+		if regexNames.MatchString(pdu.Name) {
+			var group = regexNames.FindStringSubmatch(pdu.Name)
+			var name = string(pdu.Value.([]byte))
+
+			if name == indexName {
+				index = group[1]
+				return nil
+			}
+		}
+
+		return nil
+	})
+
+	return index, err
 }
 
 // getStatus checks if the value parameter is greater than critical level or warning level, and returns a nagios format exit code
@@ -492,3 +499,4 @@ func calculatePercentage(used int64, total int64) int {
 
 	return int(math.RoundToEven(percent))
 }
+
